@@ -1,7 +1,7 @@
 {
-  "name": "telegram-whatsapp-official-bot",
-  "version": "1.0.0",
-  "description": "Telegram bot with official WhatsApp Business Cloud API integration",
+  "name": "knightbot-md",
+  "version": "2.0.0",
+  "description": "Telegram bot that pairs personal WhatsApp numbers via Baileys pairing code (no QR scan from desktop).",
   "main": "src/index.js",
   "type": "commonjs",
   "scripts": {
@@ -9,9 +9,10 @@
     "dev": "node --watch src/index.js"
   },
   "dependencies": {
-    "axios": "^1.11.0",
+    "@whiskeysockets/baileys": "^7.0.0",
     "dotenv": "^17.2.1",
-    "express": "^5.1.0",
-    "node-telegram-bot-api": "^0.66.0"
+    "node-telegram-bot-api": "^0.66.0",
+    "pino": "^9.5.0",
+    "pino-pretty": "^11.3.0"
   }
 }
