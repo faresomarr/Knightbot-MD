@@ -1,18 +1,21 @@
 {
-  "name": "knightbot-md",
-  "version": "2.0.0",
-  "description": "Telegram bot that pairs personal WhatsApp numbers via Baileys pairing code (no QR scan from desktop).",
-  "main": "src/index.js",
-  "type": "commonjs",
+  "name": "telegram-whatsapp-status-reacter",
+  "version": "1.0.0",
+  "description": "بوت تيليجرام لربط أرقام واتساب برمز الاقتران والتفاعل التلقائي مع الحالات (ستوريات) بشكل مستمر - جلسات مستقلة لكل رقم",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^7.0.0",
-    "dotenv": "^17.2.1",
+    "@whiskeysockets/baileys": "^7.0.0-rc14",
+    "dotenv": "^16.4.5",
+    "emoji-regex": "^10.3.0",
+    "express": "^5.2.1",
+    "mongodb": "^7.5.0",
     "node-telegram-bot-api": "^0.66.0",
-    "pino": "^9.5.0",
-    "pino-pretty": "^11.3.0"
+    "pino": "^9.4.0"
   }
 }
