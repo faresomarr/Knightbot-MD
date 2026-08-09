@@ -1,0 +1,17 @@
+{
+  "name": "telegram-whatsapp-official-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot with official WhatsApp Business Cloud API integration",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "axios": "^1.11.0",
+    "dotenv": "^17.2.1",
+    "express": "^5.1.0",
+    "node-telegram-bot-api": "^0.66.0"
+  }
+}
