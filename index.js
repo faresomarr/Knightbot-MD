@@ -269,12 +269,17 @@ class SessionManager {
         creds: state.creds,
         keys: makeCacheableSignalKeyStore(state.keys, P({ level: 'silent' })),
       },
-      browser: Browsers.macOS(APP_NAME),
+      browser: Browsers.macOS('Desktop'),
       syncFullHistory: false,
       markOnlineOnConnect: false,
       generateHighQualityLinkPreview: false,
       shouldIgnoreJid: () => false,
       defaultQueryTimeoutMs: 60_000,
+      connectTimeoutMs: 60_000,
+      keepAliveIntervalMs: 25_000,
+      emitOwnEvents: false,
+      retryRequestDelayMs: 250,
+      maxMsgRetryCount: 5,
       getMessage: async () => undefined,
     });
 
@@ -314,15 +319,41 @@ class SessionManager {
 
     if (!state.creds.registered && (connection === 'connecting' || !!qr) && !rt.pairingRequested) {
       rt.pairingRequested = true;
-      try {
-        const code = await sock.requestPairingCode(phone);
-        await this.store.upsertSession(phone, { status: 'pairing_code_sent' });
-        await this.deliverPairingCode(phone, code, rt.source);
-      } catch (error) {
-        rt.pairingRequested = false;
-        logger.error({ err: error, phone }, 'Failed to request pairing code');
-        await this.notifyOwner(session, `❌ تعذر استخراج كود الاقتران للرقم ${session.displayPhone}\nسبب الخطأ: ${error.message}`);
+      // IMPORTANT: give Baileys a moment to fully negotiate keys before requesting the pairing code.
+      // On Render / cloud hosts the WebSocket can flinch for the first few seconds, and calling
+      // requestPairingCode too early throws "Connection Closed" at sendRawMessage.
+      await new Promise((resolve) => setTimeout(resolve, 4_000));
+
+      let code = null;
+      let lastError = null;
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        try {
+          if (sock.ws?.isClosed) {
+            throw new Error('Connection closed before requestPairingCode');
+          }
+          code = await sock.requestPairingCode(phone);
+          if (code) break;
+        } catch (error) {
+          lastError = error;
+          logger.warn({ err: error, phone, attempt }, 'requestPairingCode attempt failed');
+          if (attempt < 3) {
+            await new Promise((resolve) => setTimeout(resolve, 1_500 * attempt));
+          }
+        }
       }
+
+      if (!code) {
+        rt.pairingRequested = false;
+        logger.error({ err: lastError, phone }, 'Failed to request pairing code after retries');
+        await this.notifyOwner(
+          session,
+          `❌ تعذر استخراج كود الاقتران للرقم ${session.displayPhone}\nسبب الخطأ: ${lastError?.message || 'unknown'}\nحاول مرة أخرى بعد لحظات بالأمر /link ${phone}`
+        );
+        return;
+      }
+
+      await this.store.upsertSession(phone, { status: 'pairing_code_sent' });
+      await this.deliverPairingCode(phone, code, rt.source);
     }
 
     if (connection === 'open') {
@@ -332,6 +363,9 @@ class SessionManager {
         ownerWaJid: userJid,
         lastConnectedAt: nowIso(),
       });
+
+      // Once open, the pairing flag is no longer needed for this session.
+      if (rt.pairingRequested) rt.pairingRequested = false;
 
       logger.info({ phone, ownerWaJid: userJid }, 'WhatsApp connected');
       await this.notifyOwner(updated, `✅ تم ربط الرقم ${updated.displayPhone} بنجاح\n🎯 إيموجي التفاعل الحالي: ${updated.emoji}\n⚙️ تفاعل الحالات التلقائي: ${updated.autoReactStatus ? 'مفعل' : 'موقف'}`);
@@ -348,9 +382,12 @@ class SessionManager {
       });
 
       this.sockets.delete(phone);
-      this.runtime.delete(phone);
-
+      // Keep the runtime alive while we attempt to reconnect so we can suppress duplicate pairing
+      // requests during the reconnect storm. We only wipe the runtime when truly logged out or
+      // when a fresh reconnect timer is queued.
+      const rtInfo = this.runtime.get(phone);
       if (!shouldReconnect) {
+        this.runtime.delete(phone);
         logger.warn({ phone }, 'WhatsApp session logged out');
         await this.notifyOwner(this.store.getSession(phone), `⚠️ تم تسجيل خروج الجلسة ${session.displayPhone}.\nأعد الربط بالأمر /link ${phone} من تيليجرام أو .pair ${phone} من واتس.`);
         await safeUnlink(this.getAuthDir(phone));
@@ -359,11 +396,25 @@ class SessionManager {
 
       logger.warn({ phone, reasonCode: code }, 'WhatsApp disconnected, reconnecting');
       await this.store.upsertSession(phone, { status: 'connecting' });
-      setTimeout(async () => {
+
+      if (rtInfo?.reconnectTimer) {
+        logger.debug({ phone }, 'Reconnect already scheduled, skipping duplicate');
+        return;
+      }
+      const retryDelay = Math.min(15_000, 3_000 + (rtInfo?.reconnectAttempts || 0) * 2_000);
+      rtInfo.reconnectAttempts = (rtInfo?.reconnectAttempts || 0) + 1;
+      rtInfo.reconnectTimer = setTimeout(async () => {
+        rtInfo.reconnectTimer = null;
+        rtInfo.pairingRequested = false;
         const latest = this.store.getSession(phone);
         if (!latest || this.sockets.has(phone)) return;
-        await this.connectSocket(latest, null);
-      }, 3_000);
+        try {
+          await this.connectSocket(latest, null);
+        } catch (error) {
+          logger.warn({ err: error, phone }, 'Reconnect attempt failed');
+        }
+      }, retryDelay);
+      this.runtime.set(phone, rtInfo);
     }
   }
 
