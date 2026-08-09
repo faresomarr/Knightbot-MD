@@ -1,80 +1,85 @@
 const fs = require('fs');
+const fsp = fs.promises;
 const path = require('path');
+const { sessionsDir } = require('./config');
 
-const dataDir = path.join(__dirname, '..', 'data');
-const dataFile = path.join(dataDir, 'users.json');
+// هذا الملف يُستخدم فقط لتخزين إعدادات إضافية (إيموجي التفاعل/تشغيل الحالات)
+// بيانات الاعتماد الأساسية للواتساب تُخزن داخل مجلد جلسة Baileys نفسه.
+// كل مستخدم تيليجرام له مجلد منفصل داخل data/sessions/<chatId>
+const metaFile = path.join(sessionsDir, '_meta.json');
 
-function ensureStorage() {
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
+async function readMeta() {
+  try {
+    const raw = await fsp.readFile(metaFile, 'utf8');
+    return JSON.parse(raw || '{}');
+  } catch (err) {
+    return {};
   }
-
-  if (!fs.existsSync(dataFile)) {
-    fs.writeFileSync(dataFile, JSON.stringify({ users: {} }, null, 2), 'utf8');
-  }
 }
 
-function readDb() {
-  ensureStorage();
-  const raw = fs.readFileSync(dataFile, 'utf8');
-  return JSON.parse(raw || '{"users":{}}');
+async function writeMeta(meta) {
+  await fsp.writeFile(metaFile, JSON.stringify(meta, null, 2), 'utf8');
 }
 
-function writeDb(db) {
-  ensureStorage();
-  fs.writeFileSync(dataFile, JSON.stringify(db, null, 2), 'utf8');
+function sessionFolder(chatId) {
+  return path.join(sessionsDir, String(chatId));
 }
 
-function getUser(telegramId) {
-  const db = readDb();
-  return db.users[String(telegramId)] || null;
+async function ensureSessionFolder(chatId) {
+  const dir = sessionFolder(chatId);
+  await fsp.mkdir(dir, { recursive: true });
+  return dir;
 }
 
-function saveUser(telegramId, payload) {
-  const db = readDb();
-  const key = String(telegramId);
-  const previous = db.users[key] || {};
+async function getMeta(chatId) {
+  const meta = await readMeta();
+  return meta[String(chatId)] || null;
+}
 
-  db.users[key] = {
-    telegramId: Number(telegramId),
+async function setMeta(chatId, data) {
+  const meta = await readMeta();
+  const key = String(chatId);
+  meta[key] = {
     reactionEmoji: '❤️',
-    autoReact: false,
-    notifyIncoming: true,
-    notifyStatuses: true,
-    createdAt: previous.createdAt || new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    ...previous,
-    ...payload
+    statusReact: true,
+    phoneNumber: null,
+    pairedAt: null,
+    ...(meta[key] || {}),
+    ...data
   };
-
-  writeDb(db);
-  return db.users[key];
+  await writeMeta(meta);
+  return meta[key];
 }
 
-function removeUser(telegramId) {
-  const db = readDb();
-  delete db.users[String(telegramId)];
-  writeDb(db);
+async function deleteMeta(chatId) {
+  const meta = await readMeta();
+  delete meta[String(chatId)];
+  await writeMeta(meta);
 }
 
-function findUserByPhoneNumberId(phoneNumberId) {
-  const db = readDb();
-  return Object.values(db.users).find(
-    (user) => String(user.phoneNumberId || '') === String(phoneNumberId || '')
-  ) || null;
+async function listAllLinkedUsers() {
+  const meta = await readMeta();
+  return Object.entries(meta).map(([chatId, data]) => ({
+    chatId,
+    ...data
+  }));
 }
 
-function findUserByVerifyToken(verifyToken) {
-  const db = readDb();
-  return Object.values(db.users).find(
-    (user) => String(user.verifyToken || '') === String(verifyToken || '')
-  ) || null;
+async function removeSessionFolder(chatId) {
+  const dir = sessionFolder(chatId);
+  try {
+    await fsp.rm(dir, { recursive: true, force: true });
+  } catch (err) {
+    // تجاهل إذا لم يوجد مجلد
+  }
 }
 
 module.exports = {
-  getUser,
-  saveUser,
-  removeUser,
-  findUserByPhoneNumberId,
-  findUserByVerifyToken
+  sessionFolder,
+  ensureSessionFolder,
+  getMeta,
+  setMeta,
+  deleteMeta,
+  listAllLinkedUsers,
+  removeSessionFolder
 };

@@ -1,7 +1,8 @@
 const { createBot } = require('./bot');
 const { startWebhookServer } = require('./server');
 
-const bot = createBot();
-startWebhookServer(bot);
-
-console.log('Telegram bot started successfully.');
+(async () => {
+  const bot = createBot();
+  startWebhookServer();
+  console.log('Knightbot-MD is up (Telegram + Baileys pairing).');
+})();
